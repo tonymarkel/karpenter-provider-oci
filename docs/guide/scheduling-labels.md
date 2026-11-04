@@ -2,6 +2,12 @@
 
 KPO supports the following scheduling labels.
 
+Flex configurations also expose `oci.oraclecloud.com/instance-ocpus` (for example,
+`2`) and `oci.oraclecloud.com/instance-memory-in-gbs` (for example, `16`). These
+describe physical OCI OCPUs and configured memory, before kubelet overhead. They
+can constrain explicit presets or [dynamic Flex configurations](dynamic-flex.md)
+using NodePool requirements such as `In`, `Gt`, and `Lt`.
+
 | Label | Example | Description                                                                                                                                                                                                          |
 |---|---|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `topology.kubernetes.io/zone` | `Uocm:PHX-AD-1` | The availability domain.                                                                                                                                                                                             |

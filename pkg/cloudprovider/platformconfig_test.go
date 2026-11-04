@@ -526,7 +526,7 @@ func newPlatformConfigCatalogue(kubeClient client.Client,
 		compute,
 		identityProvider,
 		kubernetesClient, kubeClient, reserves, nil, nil, meta, time.Hour, nil, []network.IpFamily{network.IPv4},
-		unavailable, nil, instancetype.VMMemoryOverheadConfig{}, start)
+		unavailable, nil, instancetype.VMMemoryOverheadConfig{}, nil, start)
 	Expect(err).NotTo(HaveOccurred())
 	close(start)
 	Eventually(func() bool {

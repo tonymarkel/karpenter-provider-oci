@@ -209,6 +209,110 @@ spec:
                 description: DefinedTags is customer-owned namespace key/value labels
                   passed into the compute instance.
                 type: object
+              dynamicFlex:
+                description: |-
+                  DynamicFlex generates an exact, bounded catalog of flexible VM configurations.
+                  When enabled it replaces global shape defaults and cannot be combined with ShapeConfigs.
+                  Requires Kubernetes 1.31 or later. Select shape families with NodePool requirements.
+                properties:
+                  baselineOcpuUtilization:
+                    default: BASELINE_1_1
+                    description: |-
+                      BaselineOcpuUtilization applies to every generated configuration.
+                      Burstable policies support only OCI families with known burstable limits.
+                    enum:
+                    - BASELINE_1_8
+                    - BASELINE_1_2
+                    - BASELINE_1_1
+                    type: string
+                  enabled:
+                    default: true
+                    description: Enabled activates the policy. Disabling it restores
+                      explicit/global shapeConfigs.
+                    type: boolean
+                  maxConfigurations:
+                    default: 128
+                    description: |-
+                      MaxConfigurations caps the number of valid CPU/memory pairs per shape family,
+                      before zones and capacity types. Use coarser steps or narrower bounds on overflow.
+                    format: int32
+                    maximum: 512
+                    minimum: 1
+                    type: integer
+                  memoryInGbs:
+                    description: MemoryInGbs bounds the integer memory grid in OCI
+                      gigabytes.
+                    properties:
+                      max:
+                        description: Max is the inclusive upper bound.
+                        format: int32
+                        maximum: 1048576
+                        minimum: 1
+                        type: integer
+                      min:
+                        description: Min is the inclusive lower bound and grid origin.
+                        format: int32
+                        maximum: 1048576
+                        minimum: 1
+                        type: integer
+                      step:
+                        default: 1
+                        description: Step is the positive increment from Min.
+                        format: int32
+                        maximum: 1048576
+                        minimum: 1
+                        type: integer
+                    required:
+                    - max
+                    - min
+                    type: object
+                    x-kubernetes-validations:
+                    - message: min must not exceed max
+                      rule: self.min <= self.max
+                  ocpus:
+                    description: Ocpus bounds the integer OCPU grid. These are physical
+                      OCPUs, not Kubernetes CPUs.
+                    properties:
+                      max:
+                        description: Max is the inclusive upper bound.
+                        format: int32
+                        maximum: 1048576
+                        minimum: 1
+                        type: integer
+                      min:
+                        description: Min is the inclusive lower bound and grid origin.
+                        format: int32
+                        maximum: 1048576
+                        minimum: 1
+                        type: integer
+                      step:
+                        default: 1
+                        description: Step is the positive increment from Min.
+                        format: int32
+                        maximum: 1048576
+                        minimum: 1
+                        type: integer
+                    required:
+                    - max
+                    - min
+                    type: object
+                    x-kubernetes-validations:
+                    - message: ocpus.max must be at most 4096
+                      rule: self.max <= 4096
+                    - message: min must not exceed max
+                      rule: self.min <= self.max
+                  selectionPolicy:
+                    default: lowest-price-that-fits
+                    description: |-
+                      SelectionPolicy uses concrete prices and allocatable resources through Karpenter's
+                      existing scheduling and capacity-type priorities.
+                    enum:
+                    - lowest-price-that-fits
+                    type: string
+                required:
+                - memoryInGbs
+                - ocpus
+                type: object
               freeformTags:
                 additionalProperties:
                   type: string
@@ -739,11 +843,10 @@ spec:
                 type: string
               shapeConfigs:
                 description: |-
-                  ShapeConfigs is additional shape config applies to flexible and burstable config
-                  without specifying it, flexible and burstable shapes are excluded from scheduling consideration.
-                  Different from other cloud providers, our flexible/burstable options are not offered as
-                  individual shapes, thus we cannot expose one instance type with dynamic pricing and
-                  allocatable resources.
+                  ShapeConfigs lists explicit flexible and burstable configurations. When neither
+                  ShapeConfigs nor DynamicFlex is enabled, global shape defaults apply; without
+                  global defaults, flexible shapes are excluded. Each pair is a concrete instance type
+                  with its own capacity and price. Cannot be combined with enabled DynamicFlex.
                 items:
                   properties:
                     baselineOcpuUtilization:
@@ -884,6 +987,9 @@ spec:
               rule: '!(has(oldSelf.computeClusterConfig) && oldSelf.computeClusterConfig
                 != null) || (has(self.computeClusterConfig) && self.computeClusterConfig
                 != null && self.computeClusterConfig == oldSelf.computeClusterConfig)'
+            - message: enabled dynamicFlex and shapeConfigs are mutually exclusive
+              rule: '!has(self.dynamicFlex) || (has(self.dynamicFlex.enabled) && !self.dynamicFlex.enabled)
+                || !has(self.shapeConfigs) || self.shapeConfigs.size() == 0'
           status:
             description: Status defines the observed state of the node class.
             properties:

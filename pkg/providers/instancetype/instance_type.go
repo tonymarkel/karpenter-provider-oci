@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	ociv1beta1 "github.com/oracle/karpenter-provider-oci/pkg/apis/v1beta1"
+	"github.com/oracle/karpenter-provider-oci/pkg/providers/image"
 	ocicore "github.com/oracle/oci-go-sdk/v65/core"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
@@ -33,6 +34,9 @@ type OciInstanceType struct {
 	BaselineOcpuUtilization *ociv1beta1.BaselineOcpuUtilization
 	Shape                   string
 	PlatformType            ocicore.ShapePlatformConfigOptionsTypeEnum
+	// DynamicFlexImage pins the image whose constraints validated this provisioning attempt.
+	DynamicFlexImage *image.ImageResolveResult
+	ExtendedMemory   bool
 }
 
 func (it *OciInstanceType) CopyAndUpdateOfferings(newOfferings cloudprovider.Offerings) *OciInstanceType {
@@ -50,6 +54,8 @@ func (it *OciInstanceType) CopyAndUpdateOfferings(newOfferings cloudprovider.Off
 		BaselineOcpuUtilization: it.BaselineOcpuUtilization,
 		Shape:                   it.Shape,
 		PlatformType:            it.PlatformType,
+		DynamicFlexImage:        it.DynamicFlexImage,
+		ExtendedMemory:          it.ExtendedMemory,
 	}
 }
 
@@ -121,4 +127,20 @@ func IsBurstableShape(it *OciInstanceType) bool {
 		return false
 	}
 	return true
+}
+
+// MatchesInstance compares actual launch dimensions, not a base OCI shape against
+// the synthetic catalog name. This is also used when rehydrating existing nodes.
+func (it *OciInstanceType) MatchesInstance(i *ocicore.Instance) bool {
+	if i == nil || i.Shape == nil || it.Shape != *i.Shape {
+		return false
+	}
+	if !it.SupportShapeConfig {
+		return it.Name == *i.Shape
+	}
+	cfg := i.ShapeConfig
+	return cfg != nil && cfg.Ocpus != nil && cfg.MemoryInGBs != nil && it.Ocpu != nil && it.MemoryInGbs != nil &&
+		*it.Ocpu == *cfg.Ocpus && *it.MemoryInGbs == *cfg.MemoryInGBs &&
+		(it.BaselineOcpuUtilization == nil ||
+			*it.BaselineOcpuUtilization == FromInstanceCpuBaseline(cfg.BaselineOcpuUtilization))
 }

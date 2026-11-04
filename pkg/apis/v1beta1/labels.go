@@ -22,6 +22,8 @@ func init() {
 		OciInstanceShape,
 		ReservationIDLabel,
 		OciFlexShape,
+		OciInstanceOcpus,
+		OciInstanceMemory,
 	)
 }
 
@@ -34,6 +36,8 @@ var (
 	OciBmShape           = Group + "/baremetal-shape"
 	OciDenseIoShape      = Group + "/denseio-shape"
 	OciInstanceShape     = Group + "/instance-shape"
+	OciInstanceOcpus     = Group + "/instance-ocpus"
+	OciInstanceMemory    = Group + "/instance-memory-in-gbs"
 	OciFlexShape         = Group + "/flex-shape"
 	OciFaultDomain       = Group + "/fault-domain"
 	ReservationIDLabel   = Group + "/capacity-reservation-id"

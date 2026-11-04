@@ -44,6 +44,7 @@ import (
 	corev1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
+	"sigs.k8s.io/karpenter/pkg/events"
 	coreoptions "sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
@@ -64,6 +65,7 @@ type CloudProvider struct {
 	repairPolicies              []cloudprovider.RepairPolicy
 	enableServiceLimitFallback  bool
 	initialized                 bool
+	recorder                    events.Recorder
 }
 
 func New(ctx context.Context, client client.Client, itp instancetype.Provider, imgp image.Provider,
@@ -71,7 +73,7 @@ func New(ctx context.Context, client client.Client, itp instancetype.Provider, i
 	cp capacityreservation.Provider, bsp blockstorage.Provider, npn npn.Provider,
 	instanceTypeStore *nodeoverlay.InstanceTypeStore,
 	repairPolicies []cloudprovider.RepairPolicy, enableServiceLimitFallback bool,
-	startAsync <-chan struct{}) (*CloudProvider, error) {
+	startAsync <-chan struct{}, recorders ...events.Recorder) (*CloudProvider, error) {
 	c := &CloudProvider{
 		kubeClient:                  client,
 		instanceTypeProvider:        itp,
@@ -85,6 +87,9 @@ func New(ctx context.Context, client client.Client, itp instancetype.Provider, i
 		blockStorageProvider:        bsp,
 		npnProvider:                 npn,
 		enableServiceLimitFallback:  enableServiceLimitFallback,
+	}
+	if len(recorders) > 0 {
+		c.recorder = recorders[0]
 	}
 
 	if len(repairPolicies) > 0 {
@@ -195,8 +200,14 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *corev1.NodeClaim)
 
 	// try launch until all instance types are consumed.
 	for _, instanceType := range instanceTypes {
-		imageResolveResult, resErr := c.imageProvider.ResolveImageForShape(ctx,
-			nodeClass.Spec.VolumeConfig.BootVolumeConfig.ImageConfig, instanceType.Shape)
+		// A dynamic offering was validated against this exact image in resolveInstanceTypes.
+		// Re-resolving here could select an image with different CPU/memory constraints.
+		imageResolveResult := instanceType.DynamicFlexImage
+		var resErr error
+		if imageResolveResult == nil {
+			imageResolveResult, resErr = c.imageProvider.ResolveImageForShape(ctx,
+				nodeClass.Spec.VolumeConfig.BootVolumeConfig.ImageConfig, instanceType.Shape)
+		}
 
 		if resErr != nil {
 			lg.Error(resErr, "cannot resolve image")
@@ -230,7 +241,9 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *corev1.NodeClaim)
 				"LaunchInstanceFailed", "Error Launching Instance")
 		}
 
-		lg.WithValues("instanceId", inst.Instance.Id).Info("oci instance launched")
+		lg.WithValues("instanceId", inst.Instance.Id, "instanceType", instanceType.Name,
+			"shape", instanceType.Shape, "ocpus", instanceType.Ocpu, "memoryInGbs", instanceType.MemoryInGbs,
+			"baseline", instanceType.BaselineOcpuUtilization).Info("oci instance launched")
 		selectedInstanceType = instanceType
 		break
 	}
@@ -271,7 +284,9 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *corev1.NodeClaim)
 		lg.Info("Skipping NPN Object creation")
 	}
 
-	nodeClaim = createNodeClaimFromInstanceAndInstanceType(inst.Instance, selectedInstanceType)
+	launchedNodeClaim := createNodeClaimFromInstanceAndInstanceType(inst.Instance, selectedInstanceType)
+	c.recordDynamicFlexSelection(nodeClaim, launchedNodeClaim, selectedInstanceType)
+	nodeClaim = launchedNodeClaim
 	if nodeClaim.Annotations == nil {
 		nodeClaim.Annotations = make(map[string]string)
 	}
@@ -471,7 +486,7 @@ func (c *CloudProvider) resolveInstanceTypeFromInstance(ctx context.Context,
 	}
 
 	instanceType, _ := lo.Find(instanceTypes, func(it *instancetype.OciInstanceType) bool {
-		return it.Name == *i.Shape
+		return it.MatchesInstance(i)
 	})
 
 	return instanceType, nil

@@ -24,17 +24,23 @@ import (
 // OCINodeClassSpec defines the desired state of OCINodeClass.
 // +kubebuilder:validation:XValidation:rule="((has(self.capacityReservationConfigs) && self.capacityReservationConfigs.size() > 0 ? 1 : 0) + (has(self.clusterPlacementGroupConfigs) && self.clusterPlacementGroupConfigs.size() > 0 ? 1 : 0) + (has(self.computeClusterConfig) && self.computeClusterConfig != null ? 1 : 0)) <= 1",message="At most one of capacityReservationConfigs, clusterPlacementGroupConfigs, or computeClusterConfig may be set"
 // +kubebuilder:validation:XValidation:rule="!(has(oldSelf.computeClusterConfig) && oldSelf.computeClusterConfig != null) || (has(self.computeClusterConfig) && self.computeClusterConfig != null && self.computeClusterConfig == oldSelf.computeClusterConfig)",message="computeClusterConfig is immutable once set"
+// +kubebuilder:validation:XValidation:rule="!has(self.dynamicFlex) || (has(self.dynamicFlex.enabled) && !self.dynamicFlex.enabled) || !has(self.shapeConfigs) || self.shapeConfigs.size() == 0",message="enabled dynamicFlex and shapeConfigs are mutually exclusive"
 type OCINodeClassSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// ShapeConfigs is additional shape config applies to flexible and burstable config
-	// without specifying it, flexible and burstable shapes are excluded from scheduling consideration.
-	// Different from other cloud providers, our flexible/burstable options are not offered as
-	// individual shapes, thus we cannot expose one instance type with dynamic pricing and
-	// allocatable resources.
+	// ShapeConfigs lists explicit flexible and burstable configurations. When neither
+	// ShapeConfigs nor DynamicFlex is enabled, global shape defaults apply; without
+	// global defaults, flexible shapes are excluded. Each pair is a concrete instance type
+	// with its own capacity and price. Cannot be combined with enabled DynamicFlex.
 	// +optional
 	ShapeConfigs []*ShapeConfig `json:"shapeConfigs,omitempty"`
+
+	// DynamicFlex generates an exact, bounded catalog of flexible VM configurations.
+	// When enabled it replaces global shape defaults and cannot be combined with ShapeConfigs.
+	// Requires Kubernetes 1.31 or later. Select shape families with NodePool requirements.
+	// +optional
+	DynamicFlex *DynamicFlex `json:"dynamicFlex,omitempty"`
 
 	// PlatformConfig configures Shielded Instances, confidential computing, and BIOS settings.
 	// Changes apply through node replacement.

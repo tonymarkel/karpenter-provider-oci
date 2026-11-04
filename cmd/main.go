@@ -62,6 +62,7 @@ func main() {
 		ociOptions.RepairPolicies,
 		ociOptions.EnableUnavailableOfferingsOnServiceLimitExceeded,
 		op.Elected(),
+		op.EventRecorder,
 	)
 
 	if err != nil {

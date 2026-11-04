@@ -40,6 +40,8 @@ KPO combines the `OCINodeClass` with a Karpenter `NodePool` during provisioning.
 - `spec.shapeConfigs`
   - Use this to enable flexible/burstable shapes and set `ocpus`/`memoryInGbs` on a per-`OCINodeClass` basis.
   - If you prefer a global default, you can also set `settings.flexibleShapeConfigs` in the Helm values and override it here when needed.
+- `spec.dynamicFlex`
+  - Generate an exact catalog from bounded OCPU/memory ranges. Enabled policies replace global defaults and cannot be combined with explicit `shapeConfigs`. See [Bounded Dynamic Flex Sizing](dynamic-flex.md).
 - `spec.kubeletConfig`
   - Configure kubelet limits and reservations (`maxPods`, `podsPerCore`, `systemReserved`, `kubeReserved`, etc.).
 - `spec.platformConfig`
@@ -49,7 +51,7 @@ KPO combines the `OCINodeClass` with a Karpenter `NodePool` during provisioning.
 
 ## Operator notes
 
-- Flexible and burstable shapes require shape configuration. You can set it per OCINodeClass with `spec.shapeConfigs`, or define global defaults in the Helm chart with `settings.flexibleShapeConfigs`. If neither is set, flexible and burstable shapes are excluded from scheduling consideration.
+- Flexible and burstable shapes require `spec.dynamicFlex`, explicit `spec.shapeConfigs`, or global `settings.flexibleShapeConfigs`. Without any of these, flexible and burstable shapes are excluded from scheduling consideration.
 - `spec.computeClusterConfig` is immutable after creation. Create a new `OCINodeClass` if you need to move a node class to a different compute cluster.
 - `spec.capacityReservationConfigs`, `spec.clusterPlacementGroupConfigs`, and `spec.computeClusterConfig` are mutually exclusive. 
 - Resource selector fields such as `subnetFilter`, `networkSecurityGroupFilter`, and reservation or placement-group filters must resolve to exactly one OCI resource.

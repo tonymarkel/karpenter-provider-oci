@@ -31,6 +31,9 @@ import (
 // is not a failure: the caller asked for an answer only if one was free, and there was not one.
 var errNotCached = errors.New("not cached")
 
+// ErrNoCompatibleImage distinguishes an unsupported family from a failed OCI lookup.
+var ErrNoCompatibleImage = errors.New("no image suitable")
+
 type Provider interface {
 	ResolveImages(ctx context.Context, imageCfg *v1beta1.ImageConfig) (*ImageResolveResult, error)
 
@@ -56,7 +59,7 @@ type DefaultProvider struct {
 	// this is kept as a list, other than a single image to provide possible shape selection
 	imageFilterCache *cache.GetOrLoadCache[[]*ocicore.Image]
 	// image shape cache
-	imageShapeCache *cache.GetOrLoadCache[set.Set[string]]
+	imageShapeCache *cache.GetOrLoadCache[map[string]ocicore.ImageShapeCompatibilitySummary]
 
 	preBakedImageCompartmentId    string
 	cioHardenedImageCompartmentId string
@@ -170,32 +173,45 @@ func (p *DefaultProvider) resolveImageForShape(ctx context.Context, imageCfg *v1
 	// and then check shape compatibility, with hope to hit the shape in the first few iterations, if not
 	// the first iteration
 	var firstImage *ocicore.Image
+	var compatibility ocicore.ImageShapeCompatibilitySummary
 	for _, item := range images.Images {
-		var shapes set.Set[string]
-		shapes, err = p.listShapesForImage(ctx, *item.Id, cachedOnly)
+		var shapes map[string]ocicore.ImageShapeCompatibilitySummary
+		shapes, err = p.listImageShapeCompatibility(ctx, *item.Id, cachedOnly)
 		if err != nil {
 			return nil, err
 		}
 
-		if shapes.Has(shape) {
+		if entry, ok := shapes[shape]; ok {
 			firstImage = item
+			compatibility = entry
 			break
 		}
 	}
 
 	if firstImage == nil {
-		return nil, fmt.Errorf("no image suitable for shape %s", shape)
+		return nil, fmt.Errorf("%w for shape %s", ErrNoCompatibleImage, shape)
 	}
 
 	log.FromContext(ctx).V(1).Info("image resolving result for shape", "imageName",
 		firstImage.DisplayName, "shape", shape)
 
 	// intentionally return the first image only
-	return p.toImageResolveResult([]*ocicore.Image{firstImage}, imageCfg), nil
+	result := p.toImageResolveResult([]*ocicore.Image{firstImage}, imageCfg)
+	result.ShapeCompatibility = &compatibility
+	return result, nil
 }
 
 func (p *DefaultProvider) listShapesForImage(ctx context.Context, imageOcid string,
 	cachedOnly bool) (set.Set[string], error) {
+	entries, err := p.listImageShapeCompatibility(ctx, imageOcid, cachedOnly)
+	if err != nil {
+		return nil, err
+	}
+	return set.New(lo.Keys(entries)...), nil
+}
+
+func (p *DefaultProvider) listImageShapeCompatibility(ctx context.Context, imageOcid string,
+	cachedOnly bool) (map[string]ocicore.ImageShapeCompatibilitySummary, error) {
 	if cachedOnly {
 		if shapes, ok := p.imageShapeCache.GetCached(ctx, imageOcid); ok {
 			return shapes, nil
@@ -204,22 +220,25 @@ func (p *DefaultProvider) listShapesForImage(ctx context.Context, imageOcid stri
 		return nil, errNotCached
 	}
 
-	return p.imageShapeCache.GetOrLoad(ctx, imageOcid, func(ctx2 context.Context, k string) (set.Set[string], error) {
-		var shapes []string
+	return p.imageShapeCache.GetOrLoad(ctx, imageOcid, func(ctx2 context.Context,
+		k string) (map[string]ocicore.ImageShapeCompatibilitySummary, error) {
+		shapes := make(map[string]ocicore.ImageShapeCompatibilitySummary)
 		request := ocicore.ListImageShapeCompatibilityEntriesRequest{
 			ImageId: &imageOcid,
 		}
 
 		for {
-			resp, err := p.computeClient.ListImageShapeCompatibilityEntries(ctx, request)
+			resp, err := p.computeClient.ListImageShapeCompatibilityEntries(ctx2, request)
 
 			if err != nil {
 				return nil, err
 			}
 
-			shapes = append(shapes, lo.Map(resp.Items, func(item ocicore.ImageShapeCompatibilitySummary, _ int) string {
-				return *item.Shape
-			})...)
+			for _, item := range resp.Items {
+				if item.Shape != nil {
+					shapes[*item.Shape] = item
+				}
+			}
 
 			request.Page = resp.OpcNextPage
 			if request.Page == nil {
@@ -227,7 +246,7 @@ func (p *DefaultProvider) listShapesForImage(ctx context.Context, imageOcid stri
 			}
 		}
 
-		return set.New(shapes...), nil
+		return shapes, nil
 	})
 }
 
@@ -490,7 +509,7 @@ func NewProvider(ctx context.Context, kubernetesInterface kubernetes.Interface,
 		cioHardenedImageCompartmentId: cioHardenedImageCompartmentId,
 		imageOcidCache:                cache.NewDefaultGetOrLoadCache[*ocicore.Image](),
 		imageFilterCache:              cache.NewDefaultGetOrLoadCache[[]*ocicore.Image](),
-		imageShapeCache:               cache.NewDefaultGetOrLoadCache[set.Set[string]](),
+		imageShapeCache:               cache.NewDefaultGetOrLoadCache[map[string]ocicore.ImageShapeCompatibilitySummary](),
 	}
 
 	go utils.RefreshAtInterval(ctx, true, startAsync, time.Hour, func(_ context.Context) error {

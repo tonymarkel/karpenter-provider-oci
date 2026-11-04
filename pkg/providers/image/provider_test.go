@@ -227,7 +227,11 @@ func TestResolveImageForShape(t *testing.T) {
 		var summary []ocicore.ImageShapeCompatibilitySummary
 		if *request.ImageId == "ocid1.image.123" {
 			summary = []ocicore.ImageShapeCompatibilitySummary{
-				{Shape: lo.ToPtr("VM.Standard2.1")},
+				{Shape: lo.ToPtr("VM.Standard2.1"),
+					OcpuConstraints: &ocicore.ImageOcpuConstraints{Min: lo.ToPtr(2), Max: lo.ToPtr(8)},
+					MemoryConstraints: &ocicore.ImageMemoryConstraints{
+						MinInGBs: lo.ToPtr(8), MaxInGBs: lo.ToPtr(64),
+					}},
 			}
 		} else {
 			summary = []ocicore.ImageShapeCompatibilitySummary{
@@ -246,6 +250,8 @@ func TestResolveImageForShape(t *testing.T) {
 	assert.NotNil(t, result)
 	assert.Len(t, result.Images, 1)
 	assert.Equal(t, "ocid1.image.123", *result.Images[0].Id)
+	assert.Equal(t, 2, *result.ShapeCompatibility.OcpuConstraints.Min)
+	assert.Equal(t, 64, *result.ShapeCompatibility.MemoryConstraints.MaxInGBs)
 	assert.Equal(t, 1, fakeClient.GetImageCount.Get())
 	assert.Equal(t, 1, fakeClient.ListImageShapeCompatibilityEntriesCount.Get())
 
@@ -281,6 +287,8 @@ func TestResolveImageForShape(t *testing.T) {
 	assert.Equal(t, "ocid1.image.123", *result.Images[0].Id)
 	assert.Equal(t, 1, fakeClient.ListImagesCount.Get())
 	assert.Equal(t, 1, fakeClient.ListImageShapeCompatibilityEntriesCount.Get())
+	assert.Equal(t, 2, *result.ShapeCompatibility.OcpuConstraints.Min, "cached compatibility retains image bounds")
+	assert.Equal(t, 64, *result.ShapeCompatibility.MemoryConstraints.MaxInGBs)
 
 	result, err = provider.ResolveImageForShape(ctx, imageConfig, "VM.Standard2.2")
 
@@ -1372,7 +1380,7 @@ func TestResolveImageForShapeCached_PartialChainDeclinesRatherThanReselects(t *t
 
 	// The older image is fully cached and compatible, so if the pass were to skip the one it
 	// cannot read it would happily return this instead - a different image than a launch picks.
-	provider.imageShapeCache.Set("ocid1.image.tagged", set.New("VM.Standard2.1"))
+	provider.imageShapeCache.Set("ocid1.image.tagged", imageShapeEntries("VM.Standard2.1"))
 
 	resolved, ok := provider.ResolveImageForShapeCached(ctx, cfg, "VM.Standard2.1")
 
@@ -1420,7 +1428,7 @@ func TestResolveImageForShapeCached_BothHalvesWarm(t *testing.T) {
 		TimeCreated:     &common.SDKTime{Time: time.Now()},
 		OperatingSystem: lo.ToPtr("Oracle Linux"),
 	})
-	provider.imageShapeCache.Set("ocid1.image.123", set.New("VM.Standard2.1"))
+	provider.imageShapeCache.Set("ocid1.image.123", imageShapeEntries("VM.Standard2.1"))
 
 	resolved, ok := provider.ResolveImageForShapeCached(ctx,
 		&v1beta1.ImageConfig{ImageId: lo.ToPtr("ocid1.image.123")}, "VM.Standard2.1")
@@ -1583,7 +1591,7 @@ func TestResolveImageForShapeCached_DeepChainStaysCachedOnly(t *testing.T) {
 	require.NoError(t, err)
 	provider.imageFilterCache.Set(key, []*ocicore.Image{grandchild})
 	provider.imageOcidCache.Set("ocid1.image.child", child) // first link cached, root is not
-	provider.imageShapeCache.Set("ocid1.image.grandchild", set.New("VM.Standard2.1"))
+	provider.imageShapeCache.Set("ocid1.image.grandchild", imageShapeEntries("VM.Standard2.1"))
 
 	resolved, ok := provider.ResolveImageForShapeCached(ctx,
 		&v1beta1.ImageConfig{ImageType: v1beta1.OKEImage, ImageFilter: &filter}, "VM.Standard2.1")
@@ -1621,7 +1629,7 @@ func TestResolveImageForShapeCached_UnknownCompatibilityDoesNotPromoteALaterCand
 	key, err := utils.HashFor(filter)
 	require.NoError(t, err)
 	provider.imageFilterCache.Set(key, []*ocicore.Image{preferred, runnerUp})
-	provider.imageShapeCache.Set("ocid1.image.runner-up", set.New("VM.Standard2.1"))
+	provider.imageShapeCache.Set("ocid1.image.runner-up", imageShapeEntries("VM.Standard2.1"))
 
 	resolved, ok := provider.ResolveImageForShapeCached(ctx,
 		&v1beta1.ImageConfig{ImageType: v1beta1.Custom, ImageFilter: &filter}, "VM.Standard2.1")
@@ -1663,7 +1671,7 @@ func TestResolveImageForShapeCached_ExpiredInformationDeclines(t *testing.T) {
 		provider.imageOcidCache = cache.NewGetOrLoadCache[*ocicore.Image](20*time.Millisecond, time.Minute)
 		warmImage(provider)
 		// Compatibility stays live, so only the image half can be what declines.
-		provider.imageShapeCache.Set(imageID, set.New("VM.Standard2.1"))
+		provider.imageShapeCache.Set(imageID, imageShapeEntries("VM.Standard2.1"))
 
 		_, ok := provider.ResolveImageForShapeCached(context.Background(), cfg, "VM.Standard2.1")
 		require.True(t, ok, "warm to begin with")
@@ -1678,10 +1686,11 @@ func TestResolveImageForShapeCached_ExpiredInformationDeclines(t *testing.T) {
 
 	t.Run("the compatibility lookup expires", func(t *testing.T) {
 		provider, fakeClient := newProvider(t)
-		provider.imageShapeCache = cache.NewGetOrLoadCache[set.Set[string]](20*time.Millisecond, time.Minute)
+		provider.imageShapeCache = cache.NewGetOrLoadCache[map[string]ocicore.ImageShapeCompatibilitySummary](
+			20*time.Millisecond, time.Minute)
 		// The image stays live, so only compatibility can be what declines.
 		warmImage(provider)
-		provider.imageShapeCache.Set(imageID, set.New("VM.Standard2.1"))
+		provider.imageShapeCache.Set(imageID, imageShapeEntries("VM.Standard2.1"))
 
 		_, ok := provider.ResolveImageForShapeCached(context.Background(), cfg, "VM.Standard2.1")
 		require.True(t, ok, "warm to begin with")
@@ -1694,4 +1703,12 @@ func TestResolveImageForShapeCached_ExpiredInformationDeclines(t *testing.T) {
 		assert.Equal(t, 0, fakeClient.ListImageShapeCompatibilityEntriesCount.Get(),
 			"and must not be refreshed from here")
 	})
+}
+
+func imageShapeEntries(names ...string) map[string]ocicore.ImageShapeCompatibilitySummary {
+	entries := make(map[string]ocicore.ImageShapeCompatibilitySummary)
+	for _, name := range names {
+		entries[name] = ocicore.ImageShapeCompatibilitySummary{Shape: lo.ToPtr(name)}
+	}
+	return entries
 }

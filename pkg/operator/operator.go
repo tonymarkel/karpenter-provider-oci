@@ -158,6 +158,7 @@ func createOperator(ctx context.Context, coreOp *operator.Operator,
 		unavailableOfferings,
 		capacityDiscoveryProvider,
 		ociOptions.VMMemoryOverhead(),
+		imageProvider,
 		coreOp.Elected()))
 
 	driftCaches := instance.NewDriftCaches()

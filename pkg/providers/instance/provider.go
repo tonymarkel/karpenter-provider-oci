@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -202,7 +203,7 @@ func (p *DefaultProvider) LaunchInstance(ctx context.Context,
 
 	instanceCompartment := p.GetInstanceCompartment(nodeClass)
 
-	launchOptions := BuildLaunchOptions(nodeClass.Spec.LaunchOptions)
+	launchOptions := buildInstanceLaunchOptions(nodeClass.Spec.LaunchOptions, instanceType)
 
 	agentConfig := buildAgentConfig(nodeClass.Spec.AgentPlugins)
 
@@ -749,6 +750,17 @@ func buildAgentConfig(agentPlugins []string) *ocicore.LaunchInstanceAgentConfigD
 	}
 }
 
+func buildInstanceLaunchOptions(slo *v1beta1.LaunchOptions, it *instancetype.OciInstanceType) *ocicore.LaunchOptions {
+	options := BuildLaunchOptions(slo)
+	if it.DynamicFlexImage != nil && instancetype.IsBurstableShape(it) {
+		if options == nil {
+			options = &ocicore.LaunchOptions{}
+		}
+		options.NetworkType = ocicore.LaunchOptionsNetworkTypeParavirtualized
+	}
+	return options
+}
+
 func BuildLaunchOptions(slo *v1beta1.LaunchOptions) *ocicore.LaunchOptions {
 	if slo == nil {
 		return nil
@@ -905,6 +917,17 @@ func DecorateNodeClaimByInstance(nodeClaim *corev1.NodeClaim, i *ocicore.Instanc
 	nodeClaim.CreationTimestamp = metav1.NewTime(i.TimeCreated.Time)
 
 	labels := nodeClaim.Labels
+	// Retain actual Flex identity even after a policy change removes this pair from
+	// the current catalog. It must remain trackable until normal drift replaces it.
+	if i.Shape != nil && strings.HasSuffix(*i.Shape, ".Flex") && i.ShapeConfig != nil &&
+		i.ShapeConfig.Ocpus != nil && i.ShapeConfig.MemoryInGBs != nil {
+		cfg := i.ShapeConfig
+		labels[v1.LabelInstanceTypeStable] = instancetype.FlexInstanceTypeName(*i.Shape,
+			*cfg.Ocpus, *cfg.MemoryInGBs, instancetype.FromInstanceCpuBaseline(cfg.BaselineOcpuUtilization))
+		labels[v1beta1.OciInstanceShape] = *i.Shape
+		labels[v1beta1.OciInstanceOcpus] = strconv.FormatFloat(float64(*cfg.Ocpus), 'f', -1, 32)
+		labels[v1beta1.OciInstanceMemory] = strconv.FormatFloat(float64(*cfg.MemoryInGBs), 'f', -1, 32)
+	}
 
 	labels[v1.LabelTopologyZone] = strings.Split(*i.AvailabilityDomain, ":")[1]
 	labels[corev1.CapacityTypeLabelKey] = getCapacityTypeFromInstance(i)

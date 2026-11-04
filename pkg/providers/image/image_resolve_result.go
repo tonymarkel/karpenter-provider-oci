@@ -17,4 +17,6 @@ type ImageResolveResult struct {
 	ImageType v1beta1.ImageType
 	Os        *string
 	OsVersion *string
+	// ShapeCompatibility contains the selected image's limits when resolved for a shape.
+	ShapeCompatibility *ocicore.ImageShapeCompatibilitySummary
 }

@@ -1675,16 +1675,11 @@ func TestFinalizeRequirements_OperatorMatrixAndLabels(t *testing.T) {
 	for _, tt := range tests {
 		sa := &ShapeAndAd{Shape: &tt.shape, Ads: []string{"tenancy:PHX-AD-1"}}
 		it := &OciInstanceType{
-			cloudprovider.InstanceType{
+			InstanceType: cloudprovider.InstanceType{
 				Name:         *tt.shape.Shape,
 				Requirements: scheduling.NewRequirements(),
 			},
-			false, // SupportShapeConfig
-			nil,   // Ocpu
-			nil,   // MemoryInGbs
-			nil,   // BaselineOcpuUtilization
-			*tt.shape.Shape,
-			"", // PlatformType
+			Shape: *tt.shape.Shape,
 		}
 		p.finalizeRequirements(it, sa)
 		for key, op := range tt.expect {

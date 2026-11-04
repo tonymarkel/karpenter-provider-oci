@@ -62,6 +62,19 @@ const (
 )
 
 var (
+	DynamicFlexLaunches = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: CloudProviderSubsystem,
+			Name:      "dynamic_flex_launches_total",
+			Help:      "Successful dynamic Flex launches by concrete shape configuration and capacity type.",
+		},
+		[]opmetrics.Label{{Name: ShapeLabel}, {Name: "ocpus"}, {Name: "memory_in_gbs"},
+			{Name: "baseline"}, {Name: CapacityTypeLabel}},
+		opmetrics.Alpha,
+	)
+
 	NodeClassReady = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
 		prometheus.GaugeOpts{

@@ -28,6 +28,7 @@ import (
 	"github.com/oracle/karpenter-provider-oci/pkg/providers/clusterplacementgroup"
 	"github.com/oracle/karpenter-provider-oci/pkg/providers/computecluster"
 	"github.com/oracle/karpenter-provider-oci/pkg/providers/identity"
+	"github.com/oracle/karpenter-provider-oci/pkg/providers/image"
 	"github.com/oracle/karpenter-provider-oci/pkg/providers/network"
 	"github.com/oracle/karpenter-provider-oci/pkg/utils"
 	ocicore "github.com/oracle/oci-go-sdk/v65/core"
@@ -92,6 +93,7 @@ type DefaultProvider struct {
 	// image resolution or its caches as dependencies, and must not depend on advice arriving.
 	capacityAdvisor  capacitydiscovery.Advisor
 	vmMemoryOverhead VMMemoryOverheadConfig
+	imageProvider    image.Provider
 
 	lock sync.RWMutex
 }
@@ -113,6 +115,7 @@ func New(ctx context.Context,
 	unavailableOfferings *cache.UnavailableOfferings,
 	capacityAdvisor capacitydiscovery.Advisor,
 	vmMemoryOverhead VMMemoryOverheadConfig,
+	imageProvider image.Provider,
 	startAsync <-chan struct{}) (*DefaultProvider, error) {
 	p := &DefaultProvider{
 		region:                        region,
@@ -132,6 +135,7 @@ func New(ctx context.Context,
 		unavailableOfferings:          unavailableOfferings,
 		capacityAdvisor:               capacityAdvisor,
 		vmMemoryOverhead:              vmMemoryOverhead,
+		imageProvider:                 imageProvider,
 	}
 
 	p.GlobalShapeConfigs = lo.Map(globalShapeConfigs, func(item ociv1beta1.ShapeConfig, _ int) *ociv1beta1.ShapeConfig {
@@ -879,7 +883,7 @@ func (p *DefaultProvider) setOfferings(ctx context.Context, it *OciInstanceType,
 
 	hasPreemptibleTaints := checkTaintExists(taints, PreemptibleTaintKey)
 	// Preemptible capacity does not support burstable instances, nor capacity reservation.
-	if available && isPreemptible && !IsBurstableShape(it) && len(capResAdMap) == 0 {
+	if available && isPreemptible && !IsBurstableShape(it) && !it.ExtendedMemory && len(capResAdMap) == 0 {
 		if hasPreemptibleTaints {
 			offerings = append(offerings, makeSpotOffering(shapeAndAd.Ads, basePrice)...)
 		} else {
@@ -888,7 +892,7 @@ func (p *DefaultProvider) setOfferings(ctx context.Context, it *OciInstanceType,
 		}
 	}
 
-	if available && capResAdMap != nil {
+	if available && capResAdMap != nil && !IsBurstableShape(it) && !it.ExtendedMemory {
 		// be noticed capacity reservation does not support burstable && preemptible
 		offerings = append(offerings, makeReservedOffering(basePrice, capResAdMap)...)
 	}
@@ -985,7 +989,9 @@ func (p *DefaultProvider) refreshClusterVersion(ctx context.Context) error {
 			"duration_ms", time.Since(start).Milliseconds())
 		return err
 	}
+	p.lock.Lock()
 	p.k8sVersion = k8sVersion
+	p.lock.Unlock()
 	lg.Info("refresh cluster version done",
 		"operation", "refresh_cluster_version", "outcome", "success",
 		"version", k8sVersion.String(),
@@ -998,6 +1004,9 @@ ListInstanceTypes return all available instance types.
 */
 func (p *DefaultProvider) ListInstanceTypes(ctx context.Context,
 	nodeClass *ociv1beta1.OCINodeClass, taints []v1.Taint) ([]*OciInstanceType, error) {
+	if nodeClass != nil && nodeClass.Spec.DynamicFlex.IsEnabled() {
+		return p.listDynamicFlexTypes(ctx, nodeClass, taints)
+	}
 	p.lock.RLock()
 	defer p.lock.RUnlock()
 	// Helpers in this call tree read provider state under this lock and must not reacquire it.
@@ -1044,7 +1053,11 @@ func (p *DefaultProvider) makeInstanceTypes(ctx context.Context,
 		}
 		candidateTypes = []*OciInstanceType{it}
 	}
+	return p.decorateInstanceTypes(ctx, sa, nodeClass, taints, candidateTypes)
+}
 
+func (p *DefaultProvider) decorateInstanceTypes(ctx context.Context, sa *ShapeAndAd,
+	nodeClass *ociv1beta1.OCINodeClass, taints []v1.Taint, candidateTypes []*OciInstanceType) ([]*OciInstanceType, error) {
 	// Ask once for the shape rather than once per generated configuration. A flexible shape
 	// expands into many instance types that all share it, and obtaining advice is the only part of
 	// decoration that can reach OCI.
@@ -1139,6 +1152,13 @@ func (p *DefaultProvider) finalizeRequirements(instanceType *OciInstanceType,
 
 	requirements = append(requirements, scheduling.NewRequirement(ociv1beta1.OciInstanceShape, v1.NodeSelectorOpIn,
 		instanceType.Shape))
+	if instanceType.Ocpu != nil && instanceType.MemoryInGbs != nil {
+		cpu := strconv.FormatFloat(float64(*instanceType.Ocpu), 'f', -1, 32)
+		memory := strconv.FormatFloat(float64(*instanceType.MemoryInGbs), 'f', -1, 32)
+		requirements = append(requirements,
+			scheduling.NewRequirement(ociv1beta1.OciInstanceOcpus, v1.NodeSelectorOpIn, cpu),
+			scheduling.NewRequirement(ociv1beta1.OciInstanceMemory, v1.NodeSelectorOpIn, memory))
+	}
 
 	instanceType.Requirements = scheduling.NewRequirements(requirements...)
 }

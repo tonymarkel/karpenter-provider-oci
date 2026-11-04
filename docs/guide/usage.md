@@ -1,5 +1,8 @@
 # Usage
 
+For automatically generated Flex sizes from bounded OCPU/memory ranges, see
+[Bounded Dynamic Flex Sizing](dynamic-flex.md). The examples below use explicit presets.
+
 Here are a few common use cases. For solutions addressing additional scenarios, refer to the [Advanced Use Cases](advanced-use-cases.md) or check the [OCINodeClass](ocinodeclass.md) specification.
 
 ---

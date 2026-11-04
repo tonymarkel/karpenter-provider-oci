@@ -116,6 +116,7 @@ func createStaticFieldsClone(originalSpec *v1beta1.OCINodeClassSpec) *v1beta1.OC
 	}
 
 	// Below is covered by IsInstanceDrifted
+	// DynamicFlex changes eligibility; IsInstanceShapeDrifted checks whether the running size remains valid.
 	// ncSpecToSerialize.ClusterPlacementGroupConfigs
 	// ncSpecToSerialize.CapacityReservationConfigs
 	// ncSpecToSerialize.ComputeClusterConfig

@@ -43,6 +43,7 @@ See [Installation](docs/guide/installation.md).
 - [OCI API Rate Limiter](docs/guide/rate-limiter.md)
 - [OCI v1beta1 API](docs/reference/v1beta1-api-raw.md)
 - [Scheduling Labels](docs/guide/scheduling-labels.md)
+- [Bounded Dynamic Flex Sizing](docs/guide/dynamic-flex.md)
 - [Usage](docs/guide/usage.md)
   - [Use KPO to manage nodes with OCI flexible shapes and an OKE image](docs/guide/usage.md#use-kpo-to-manage-nodes-with-oci-flexible-shapes-and-an-oke-image)
   - [Ensure worker nodes using an OKE image are always updated to the latest image](docs/guide/usage.md#ensure-worker-nodes-using-an-oke-image-are-always-updated-to-the-latest-image)

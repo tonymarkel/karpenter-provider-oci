@@ -144,6 +144,9 @@ func TestHashNodeClassSpec_StaticFieldsCloning(t *testing.T) {
 
 	// Mutate dynamic fields, verify hash does NOT change
 	nodeClass.Spec.NetworkConfig.PrimaryVnicConfig.VnicDisplayName = &dynamicValue2
+	nodeClass.Spec.DynamicFlex = &v1beta1.DynamicFlex{
+		Ocpus: v1beta1.FlexRange{Min: 1, Max: 8}, MemoryInGbs: v1beta1.FlexRange{Min: 4, Max: 32},
+	}
 
 	hashAfterDynamicChanges := HashNodeClassSpec(nodeClass)
 	require.Equal(t, initialHash, hashAfterDynamicChanges,
